@@ -35,7 +35,10 @@ public interface IDeepGenerator {
 
     /**
      * Whether this generator works in a world (a dimension with deep layers). Asked once per world, when it is first
-     * generated in. Default: every such world.
+     * generated in. Default: every such world. Not asked in a dimension claimed through
+     * {@link BellowAPI#claimDimension} (only its owner runs there), nor for a generator that claimed dimensions (it
+     * runs
+     * only in those).
      *
      * @since API 3
      */

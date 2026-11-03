@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.akashiic.bellow"
-version = System.getenv("VERSION") ?: "0.1.0-beta.4"
+version = System.getenv("VERSION") ?: "0.1.0-beta.5"
 base.archivesName = "AkashicBellow-WorldEdit-6.1.9"
 
 repositories { mavenCentral() }

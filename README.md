@@ -5,7 +5,7 @@ rede, luz, compatibilidade e a API para geradores. O BelowCore **não gera conte
 profunda é (deepslate, piso de bedrock, minérios, cavernas) vem de um gerador registrado na API; no TEOF, do
 **VitaGenesis**.
 
-Status: **beta** (`0.1.0-beta.4`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
+Status: **beta** (`0.1.0-beta.5`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
 
 ## O que faz
 
@@ -88,7 +88,7 @@ Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
 
 Cada push no `main` roda o workflow **Build**, que gera do mesmo commit o mod e o agent do WorldEdit (companion) e
 publica os dois como artifacts do mesmo run, sem zip: `AkashicBellow-<versão>.jar` e
-`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.4-<commit>`. O resumo do run lista o
+`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.5-<commit>`. O resumo do run lista o
 SHA-256 de cada jar.
 
 ## Compilar e testar
@@ -117,14 +117,14 @@ os screenshots em `run/client/screenshots/`.
 
 ## API
 
-`com.akashiic.bellow.api.BellowAPI` (versão da API 4, em `BellowAPI.apiVersion()`):
+`com.akashiic.bellow.api.BellowAPI` (versão da API 5, em `BellowAPI.apiVersion()`):
 
 * Leitura: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`, para mods que iteram seções
   diretamente e querem enxergar o subsolo. `IDeepChunk`/`IDeepWorld` são somente leitura.
 * **Geradores profundos** (cavernas, aquíferos, estruturas): `registerGenerator(id, IDeepGenerator[, prioridade])`
   até o postInit; ordem por prioridade e depois id, gravada por dimensão em `akashicbellow.dat` (aviso quando muda).
-  O gerador recebe cada chunk novo logo depois do preenchimento e antes dos minérios (`generateTerrain`), a região
-  3×3 depois dos minérios (`decorate(IDeepRegion)`, com `setBlock`, `placeOre`, `placeBlob`, `genStateAt`), e,
+  O gerador recebe cada chunk novo com as seções profundas vazias (`generateTerrain`), a região 3×3 quando os
+  vizinhos têm terreno (`decorate(IDeepRegion)`, com `setBlock`, `placeOre`, `placeBlob`, `genStateAt`), e,
   depois do tick do mundo, o chunk decorado (`onDecorated`) e o chunk já iluminado pela etapa de luz do Bellow com o
   5×5 em volta decorado (`onLit`). Cada etapa roda uma vez por chunk; o que ficou pendente (chunk descarregado,
   servidor parado) roda na próxima carga. Chunks cujo subsolo foi gerado antes de o gerador ser instalado nunca são
@@ -134,12 +134,18 @@ os screenshots em `run/client/screenshots/`.
   id)` (NBT do gerador, salvo com o subsolo e mantido sem o addon); `isDecorated(chunk)`, `isLightPending(chunk)`.
 * API 4: o núcleo não preenche a camada; os geradores recebem as seções vazias. Saíram `getFillBlock`, `getFillMeta`,
   `isDeepFill`, `isBaseStone` e `isDeepHost` (da API 3).
+* **Dimensão de um mod** (API 5): `claimDimension(dimensionId, minY, generatorId)` até o postInit. A dimensão ganha
+  camada profunda com esse piso, sem precisar estar em `general.dimensions` e sem usar `general.minY`; só o gerador
+  indicado roda nela (nenhum outro é consultado, nem o `appliesTo`), e um gerador que reclamou dimensões só roda
+  nelas. Um save que já travou outro piso para a dimensão mantém o dele (com aviso). Reclamar a mesma dimensão com
+  outro gerador ou outro piso é erro na inicialização; a mesma chamada duas vezes é aceita.
+  `getDimensionOwner(dimensionId)` diz quem reclamou (também no `/bellow info`).
 * `resendDeepSections(world, chunk, slotMask)`: reenvia seções escritas diretamente aos jogadores que já receberam o
   chunk.
 * Para testar um gerador: `worldgen.strictGenerators=true` recusa (e registra) escritas pelo `World` que o contrato
   proíbe durante `generateTerrain`/`decorate`; num self-test sem ticks, `runDeepStages(world)` roda na hora as etapas
   de depois do tick.
 
-Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 4` (ou a versão de
+Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 5` (ou a versão de
 que precisa) em tempo de execução, dentro de um `try`/`catch (NoSuchMethodError e)` (a API 1 não tem o método). Não compare a versão do mod:
 os builds de CI levam o sufixo do commit.

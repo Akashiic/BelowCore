@@ -69,7 +69,9 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
 
 ## 4. Rede
 
-* Mod obrigatório nos dois lados.
+* Mod obrigatório nos dois lados, do mesmo build. O FML já recusa um cliente sem o mod ou de outra versão; um
+  `@NetworkCheckHandler` (desde a beta.5) faz o cliente recusar também um servidor sem o mod, que o FML aceitava por
+  padrão (`side == SERVER`) e que derrubava o cliente no primeiro `S28PacketEffect` (Y com sinal em `short`).
 * `ChunkAPI PacketDataManager` (`akashicbellow:deep`) anexa as seções profundas a S21/S26:
   `short minY, int slotMask, depois para cada bit: int len + bloco de DataRegistryImpl.writeToBufferCubic`
   (os mesmos managers "cúbicos" do ChunkAPI/EndlessIDs). Pacote de descarregar e chunks sem dados profundos: vazio.
@@ -196,6 +198,23 @@ Garantias:
   por dimensão em `akashicbellow.dat` (`Generators`, com `id@version`); se mudar entre sessões, aviso no log (as
   cavernas podem não continuar na fronteira com o que foi gerado antes). Registro tardio ou id repetido lançam
   exceção. `appliesTo(WorldServer)` escolhe as dimensões de cada gerador (perguntado uma vez por mundo).
+* **Dimensão de um mod** (API 5, issue #2): `claimDimension(dimensionId, minY, generatorId)` até o
+  `FMLServerAboutToStartEvent`, como `registerGenerator`. Para o mod dono de uma dimensão (o Akashic ATM Family com a
+  Mining e a The Other, piso −64 num pack com `general.minY = -128`):
+  * a dimensão tem camada profunda com o piso reclamado, esteja ou não em `general.dimensions`, e `general.minY` não
+    vale para ela (`DeepWorlds.resolve`). A trava do save continua mandando: um save que já travou outro piso para a
+    dimensão mantém o dele, com aviso, como com a config.
+  * só o gerador dono roda nela: os outros não são consultados, nem o `appliesTo`, e não recebem `generateTerrain`,
+    `decorate`, `onDecorated` nem `onLit` (é a mesma lista por mundo de `DeepGenerators.forWorld`). Sem camada
+    provisória enquanto o dono estiver instalado.
+  * um gerador que reclamou dimensões só roda nelas, sem `appliesTo`: sem isso, o gerador do ATM (com o `appliesTo`
+    padrão) rodaria também no overworld, junto com o VitaGenesis.
+  * reclamar uma dimensão já reclamada com outro gerador ou outro piso, piso fora de −512..−16 ou que não seja
+    múltiplo de 16 e id vazio lançam `IllegalArgumentException`; a mesma chamada duas vezes é aceita; depois do início
+    do servidor, `IllegalStateException`.
+  * dono não registrado (id errado): erro no log, nenhum gerador roda na dimensão (camada provisória, trocada por
+    retrogen quando o dono for registrado). Não derruba o servidor.
+  * `getDimensionOwner(dimensionId)` e o `/bellow info` mostram o dono.
 * Uma exceção de um gerador é registrada no log (pilha completa nas 3 primeiras, depois só contagem) e o chunk segue;
   os geradores seguintes rodam no mesmo chunk. O que foi escrito antes da falha é marcado para salvar e reenviado
   (`finally`).
@@ -688,6 +707,53 @@ a borda com pulo segurado, executando o movimento vanilla tick a tick, em Y 100 
 Com a correção: Forge puro 63 PASS e com o pacote de compatibilidade 63 PASS (as duas sondas iguais às da tabela);
 clientes vanilla e Angelica PASS (a mixin aplica no cliente: com `require = 2` o jogo não abriria sem ela); Crucible
 (cópia de teste) 75 PASS, com as duas sondas como acima. O nado em si não é exercitado no cliente headless.
+
+### 10.6 Issues #1 e #2 (beta.5, API 5)
+
+**#1, cliente com o mod num servidor sem ele.** Conferido no fonte do FML 1614: sem a entrada do mod na lista do outro
+lado, o `DefaultNetworkChecker` responde `side == Side.SERVER`, e com o mod nos dois lados exige a mesma versão.
+O `@NetworkCheckHandler` do `AkashicBellow` exige o mod do outro lado **com a versão que o próprio FML anuncia**
+(`ModContainer.getVersion()`): só o caso do servidor sem o mod muda; checar só a presença, como sugerido na issue,
+deixaria entrar builds diferentes. `NetworkCheckProbe` passa pela decisão do FML (`NetworkModHolder.check` e
+`FMLNetworkHandler.checkModList`, chamados pelos dois estados do handshake).
+
+**#2, dimensão de um mod** (§5.1). `ClaimProbe`: o End (dimensão 1, fora de `general.dimensions`) reclamado por um
+gerador de teste com piso −48 (config −64); na verify, reclamado com −32.
+
+| verificação | resultado |
+|---|---|
+| servidor sem Bellow (lista do servidor vista pelo cliente) | recusado: `Mod rejections [FMLMod:akashicbellow{…}]` |
+| mesmo build aceito; cliente sem Bellow, outra versão e vanilla recusados | sim (os três já eram recusados antes) |
+| reclamações conflitantes (outro dono, outro piso), piso −40, id vazio | recusadas; a mesma reclamação duas vezes aceita |
+| reclamação depois do início do servidor | recusada |
+| piso da dimensão reclamada | −48 (config −64, End fora de `general.dimensions`) |
+| só o dono gera ali | 9 chamadas de terreno, piso de obsidiana em 2304/2304 colunas, geradores do End = só o dono; a camada de teste (que vale em qualquer dimensão) não rodou no End |
+| o dono não gera em outra dimensão | dono só no End, camada de teste só no overworld |
+| (verify, JVM nova, reclamado com −32) a trava do save vence | End em −48, piso gerado mantido |
+| unidade (`DeepGeneratorsTest`) | exclusividade, nenhum `appliesTo` perguntado na dimensão reclamada, conflitos, piso inválido, tarde demais, dono não registrado |
+
+No Crucible com o pack inteiro, `checkModList` com a própria lista do servidor também é recusado pelo
+`salisarcana` (verificação própria dele); a sonda conta só o veredito do Bellow. Na cópia do Crucible o End já tinha
+chunks explorados com piso 0: reclamado, recebeu o subsolo do dono por retrogen (1295 chamadas de terreno). É o que
+acontece com qualquer dimensão já explorada que passa a ter camada (por config ou por reclamação): o dono recebe esses
+chunks com `retrogen = true` e decide o que fazer.
+
+| controle (correção desfeita) | o que reprova |
+|---|---|
+| sem o `@NetworkCheckHandler` | servidor sem Bellow aceito (FML: `null`); vanilla aceito |
+| reclamação não exclusiva (todos os geradores rodam na dimensão) | geradores do End = os 4; a camada de teste gera no End e cobre o piso do dono (0/2304 colunas); na verify o piso gerado sumiu |
+| piso ignorando a reclamação | End com minY 0, dono sem chamadas; na verify, minY 0 |
+| dono rodando também fora das suas dimensões | dono gera no overworld: 25 câmaras de outro gerador preenchidas (12.725 blocos), lista de geradores do overworld errada, etapa de luz e retomada quebradas — o que aconteceria com o ATM ao lado do VitaGenesis |
+
+Validação (beta.5):
+
+| execução | resultado |
+|---|---|
+| unidade | `DeepGeneratorsTest` 9/9 (3 novos) e os demais |
+| `tools/selftest.sh` puro / com o pacote de compatibilidade | full 72 PASS, verify 15 PASS nos dois |
+| `tools/clienttest.sh` vanilla / compat / Angelica | 27 / 28 / 28 PASS, quadros PASS (o handshake do servidor integrado passa pela mesma verificação) |
+| Crucible (cópia de teste, pack inteiro) | 84 PASS |
+| self-test do VitaGenesis (API 3) contra a beta.5, piso −64 | bootstrap, full e reload PASS |
 
 ## 11. Riscos abertos (beta)
 

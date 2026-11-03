@@ -62,6 +62,7 @@ public final class SelfTest {
                 this.verifyPersisted(minY);
                 com.akashiic.bellow.selftest.ProvisionalProbe.verify((WorldServer) this.world, minY, this::check);
                 com.akashiic.bellow.selftest.GeneratorProbe.verify((WorldServer) this.world, minY, this::check);
+                com.akashiic.bellow.selftest.ClaimProbe.verify(this::check);
             } else {
                 this.retrogen(minY);
                 this.terrain(minY);
@@ -74,6 +75,8 @@ public final class SelfTest {
                 com.akashiic.bellow.selftest.ProvisionalProbe.run((WorldServer) this.world, minY, this::check);
                 com.akashiic.bellow.selftest.StorageProbe.run((WorldServer) this.world, this::check);
                 com.akashiic.bellow.selftest.WaterProbe.run((WorldServer) this.world, minY, this::check);
+                com.akashiic.bellow.selftest.NetworkCheckProbe.run(this::check);
+                com.akashiic.bellow.selftest.ClaimProbe.run(this::check);
                 if (cpw.mods.fml.common.Loader.isModLoaded("BuildCraft|Core")) {
                     com.akashiic.bellow.selftest.BuildCraftProbe.run((WorldServer) this.world, this::check);
                 }

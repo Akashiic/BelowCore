@@ -54,8 +54,12 @@ public final class TestLayer implements IDeepGenerator {
         return null;
     }
 
+    /** Dimensions it generated in (a claimed dimension must not be among them). */
+    public final Set<Integer> dims = new HashSet<>();
+
     @Override
     public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
+        this.dims.add(chunk.worldObj.provider.dimensionId);
         this.calls++;
         long key = ChunkCoordIntPair.chunkXZ2Int(chunk.xPosition, chunk.zPosition);
         for (int sy = minY >> 4; sy < 0; sy++) {

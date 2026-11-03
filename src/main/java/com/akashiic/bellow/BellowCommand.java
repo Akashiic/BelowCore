@@ -64,9 +64,11 @@ public class BellowCommand extends CommandBase {
                 say(
                     sender,
                     String.format(
-                        "dim %d minY %d | chunk [%d, %d] gen=%d deepSections=%d fromDisk=%s",
+                        "dim %d minY %d%s | chunk [%d, %d] gen=%d deepSections=%d fromDisk=%s",
                         world.provider.dimensionId,
                         BellowAPI.getMinY(world),
+                        BellowAPI.getDimensionOwner(world.provider.dimensionId) == null ? ""
+                            : " claimed by " + BellowAPI.getDimensionOwner(world.provider.dimensionId),
                         chunk.xPosition,
                         chunk.zPosition,
                         deep.bellow$getGenState(),

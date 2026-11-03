@@ -1,5 +1,7 @@
 package com.akashiic.bellow;
 
+import java.util.Map;
+
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
@@ -19,6 +21,7 @@ import com.gtnewhorizon.gtnhlib.config.ConfigException;
 import com.gtnewhorizon.gtnhlib.config.ConfigurationManager;
 
 import cpw.mods.fml.common.FMLCommonHandler;
+import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
@@ -30,6 +33,7 @@ import cpw.mods.fml.common.event.FMLServerStoppedEvent;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
+import cpw.mods.fml.common.network.NetworkCheckHandler;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
@@ -57,6 +61,21 @@ public class AkashicBellow {
         } catch (ConfigException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * The widened packets (signed Y in S28, S0A, C07, C08, deep sections in chunk data) only work with Bellow on both
+     * sides, of the same build. FML's default check already refuses a client without Bellow and a different version;
+     * it accepts a server without Bellow, where the client then fails on the first world effect packet.
+     */
+    @NetworkCheckHandler
+    public boolean checkRemote(Map<String, String> remoteMods, Side remoteSide) {
+        String remote = remoteMods.get(MODID);
+        return remote != null && remote.equals(
+            Loader.instance()
+                .getIndexedModList()
+                .get(MODID)
+                .getVersion());
     }
 
     @Mod.EventHandler
@@ -89,6 +108,9 @@ public class AkashicBellow {
             if ("full".equals(phase) || "verify".equals(phase)) com.akashiic.bellow.selftest.TestLayer.register();
             if ("full".equals(phase)) com.akashiic.bellow.selftest.GeneratorProbe.register();
             if ("verify".equals(phase)) com.akashiic.bellow.selftest.GeneratorProbe.registerSecondOnly();
+            // the End, claimed by a test generator (API 5): -48 in full, -32 in verify (the locked -48 must win)
+            if ("full".equals(phase)) com.akashiic.bellow.selftest.ClaimProbe.register(-48);
+            if ("verify".equals(phase)) com.akashiic.bellow.selftest.ClaimProbe.register(-32);
         }
         // Registered after EndlessIDs (dependency ordering), so the per-section packet budget already accounts for it.
         DataRegistry.registerDataManager(new DeepDataManager());

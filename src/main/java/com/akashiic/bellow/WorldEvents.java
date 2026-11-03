@@ -32,7 +32,15 @@ public final class WorldEvents {
         if (Compat.crucible) BukkitFloors.publish(world);
         if (world instanceof WorldServer && BellowAPI.hasDeepLayers(world)) {
             DeepWorlds.recordGenerators((WorldServer) world, DeepGenerators.describe(world));
-            if (GenConfig.enabled && !DeepGenerators.anyFor(world)) {
+            String owner = BellowAPI.getDimensionOwner(world.provider.dimensionId);
+            if (GenConfig.enabled && !DeepGenerators.anyFor(world) && owner != null) {
+                AkashicBellow.LOG.error(
+                    "Dimension {} is claimed by {}, which is not a registered deep generator: new chunks get {}",
+                    world.provider.dimensionId,
+                    owner,
+                    GenConfig.provisionalLayer ? "a provisional stone layer, replaced when the generator is registered"
+                        : "no deep layer (worldgen.provisionalLayer=false)");
+            } else if (GenConfig.enabled && !DeepGenerators.anyFor(world)) {
                 AkashicBellow.LOG.warn(
                     "Dimension {} has a deep layer (floor {}) but no deep generator: Bellow places no content below 0."
                         + " New chunks get {}; install a generator (VitaGenesis) to make the layer",

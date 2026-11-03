@@ -113,4 +113,61 @@ class DeepGeneratorsTest {
         DeepGenerators.generateTerrain(new Chunk(null, 0, 0), -64, 1L, false);
         assertThrows(IllegalStateException.class, () -> DeepGenerators.register("a:late", new IDeepGenerator() {}, 0));
     }
+
+    @Test
+    void aClaimedDimensionRunsOnlyItsOwnerAndTheOwnerOnlyThere() {
+        List<String> asked = new ArrayList<>();
+        DeepGenerators.register("a:vita", new IDeepGenerator() {
+
+            @Override
+            public boolean appliesTo(net.minecraft.world.WorldServer world) {
+                asked.add("vita");
+                return true;
+            }
+        }, 0);
+        DeepGenerators.register("b:atm", new IDeepGenerator() {
+
+            @Override
+            public boolean appliesTo(net.minecraft.world.WorldServer world) {
+                asked.add("atm");
+                return true;
+            }
+        }, 10);
+        DeepGenerators.claim(240, -64, "b:atm");
+        DeepGenerators.claim(241, -64, "b:atm");
+        assertEquals(Arrays.asList("b:atm"), DeepGenerators.idsForDimension(240));
+        assertEquals(Arrays.asList("b:atm"), DeepGenerators.idsForDimension(241));
+        assertEquals(Arrays.asList(), asked, "nobody is asked in a claimed dimension");
+        assertEquals(Arrays.asList("a:vita"), DeepGenerators.idsForDimension(0));
+        assertEquals(Arrays.asList("vita"), asked, "the owner is not asked outside its dimensions");
+        assertEquals("b:atm", DeepGenerators.owner(240));
+        assertEquals(Integer.valueOf(-64), DeepGenerators.claimedFloor(241));
+        assertEquals(null, DeepGenerators.owner(0));
+        assertEquals(null, DeepGenerators.claimedFloor(0));
+    }
+
+    @Test
+    void conflictingOrInvalidClaimsAreRejected() {
+        DeepGenerators.claim(240, -64, "b:atm");
+        DeepGenerators.claim(240, -64, "b:atm"); // the same claim twice is fine
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(240, -64, "c:other"));
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(240, -128, "b:atm"));
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(7, -60, "b:atm"));
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(7, 0, "b:atm"));
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(7, -528, "b:atm"));
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(7, -64, ""));
+        assertThrows(IllegalArgumentException.class, () -> DeepGenerators.claim(7, -64, null));
+        assertEquals("b:atm", DeepGenerators.owner(240));
+        assertEquals(null, DeepGenerators.owner(7));
+        DeepGenerators.freeze();
+        assertThrows(IllegalStateException.class, () -> DeepGenerators.claim(8, -64, "b:atm"));
+    }
+
+    @Test
+    void aClaimByAnUnregisteredGeneratorKeepsTheDimensionExclusive() {
+        DeepGenerators.register("a:vita", new IDeepGenerator() {}, 0);
+        DeepGenerators.claim(240, -64, "b:missing");
+        assertEquals(Arrays.asList(), DeepGenerators.idsForDimension(240));
+        assertEquals(Arrays.asList("a:vita"), DeepGenerators.idsForDimension(0));
+    }
 }

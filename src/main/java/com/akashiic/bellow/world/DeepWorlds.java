@@ -23,6 +23,7 @@ import net.minecraft.world.storage.ISaveHandler;
 import com.akashiic.bellow.AkashicBellow;
 import com.akashiic.bellow.BellowConfig;
 import com.akashiic.bellow.api.DeepConstants;
+import com.akashiic.bellow.gen.DeepGenerators;
 
 /**
  * Resolves the floor of a world, and records the deep generators each dimension was generated with.
@@ -31,6 +32,9 @@ import com.akashiic.bellow.api.DeepConstants;
  * {@code <save>/akashicbellow.dat}. From then on the stored value wins over the config, so a world can never end up
  * with chunks generated for two different floors. A locked dimension keeps its floor even if it is later removed from
  * the config: running it with floor 0 would drop its deep tile entities and entities on the next save.
+ * <p>
+ * A dimension claimed by its owning mod ({@link com.akashiic.bellow.api.BellowAPI#claimDimension}) is enabled with the
+ * claimed floor instead of the config; a lock already in the save still wins.
  * <p>
  * Client worlds start at 0 and are updated by the server ({@code DimensionInfoMessage}).
  */
@@ -49,8 +53,11 @@ public final class DeepWorlds {
             return announced == null ? 0 : announced;
         }
         int dim = world.provider.dimensionId;
-        boolean enabled = BellowConfig.isDimensionEnabled(dim);
-        int configured = DeepConstants.sanitizeMinY(BellowConfig.minY);
+        // a dimension claimed by its owning mod has deep layers with the claimed floor, whatever the config says
+        Integer claimed = DeepGenerators.claimedFloor(dim);
+        boolean enabled = claimed != null || BellowConfig.isDimensionEnabled(dim);
+        int configured = claimed != null ? claimed : DeepConstants.sanitizeMinY(BellowConfig.minY);
+        String source = claimed != null ? "claimed by " + DeepGenerators.owner(dim) : "configured";
 
         ISaveHandler handler = world.getSaveHandler();
         File dir = handler == null ? null : handler.getWorldDirectory();
@@ -82,10 +89,11 @@ public final class DeepWorlds {
                     locked);
             } else if (locked != configured) {
                 AkashicBellow.LOG.warn(
-                    "Dimension {} of '{}' is locked to minY {}; ignoring configured {} (delete {} only together with the deep chunk data)",
+                    "Dimension {} of '{}' is locked to minY {}; ignoring {} {} (delete {} only together with the deep chunk data)",
                     dim,
                     dir.getName(),
                     locked,
+                    source,
                     configured,
                     FILE_NAME);
             }
@@ -100,7 +108,7 @@ public final class DeepWorlds {
         updated.setTag("Floors", updatedFloors);
         writeLock(dir, updated);
         LOCKS.put(dir.getAbsoluteFile(), updated);
-        AkashicBellow.LOG.info("Dimension {} of '{}' locked to minY {}", dim, dir.getName(), configured);
+        AkashicBellow.LOG.info("Dimension {} of '{}' locked to minY {} ({})", dim, dir.getName(), configured, source);
         return configured;
     }
 

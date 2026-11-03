@@ -33,12 +33,14 @@ public final class BellowAPI {
      * 4: Bellow is only the core: it places no content below 0 (no fill, no bedrock floor, no ores), the generators
      * make
      * the deep layer and receive its sections empty; the fill and host predicates of API 3 ({@code getFillBlock},
-     * {@code getFillMeta}, {@code isDeepFill}, {@code isDeepHost}, {@code isBaseStone}) are gone. Read at runtime: call
+     * {@code getFillMeta}, {@code isDeepFill}, {@code isDeepHost}, {@code isBaseStone}) are gone. 5: dimensions claimed
+     * by
+     * the mod that owns them ({@link #claimDimension}, {@link #getDimensionOwner}). Read at runtime: call
      * {@link #apiVersion()} (a mod compiled against version 2 that runs with version 1 gets a {@code NoSuchMethodError}
      * it can catch, instead of a value copied in at compile time).
      */
     public static int apiVersion() {
-        return 4;
+        return 5;
     }
 
     /** Same as {@link #apiVersion()}; not a compile-time constant, so javac does not copy it into other mods. */
@@ -87,6 +89,34 @@ public final class BellowAPI {
      */
     public static void registerGenerator(String id, IDeepGenerator generator, int priority) {
         DeepGenerators.register(id, generator, priority);
+    }
+
+    /**
+     * Claims a dimension for the mod that defines its deep layer, until the first server starts (like
+     * {@link #registerGenerator}). The dimension gets deep layers with this floor whatever {@code general.dimensions}
+     * and
+     * {@code general.minY} say, and only the given generator runs there: no other generator is asked, not even its
+     * {@link IDeepGenerator#appliesTo}. A generator that claims dimensions runs only in the dimensions it claimed. A
+     * save whose dimension already has a locked floor keeps it, with a warning. While the claimed generator is not
+     * registered, no generator runs in the dimension (an error is logged; new chunks get the provisional layer).
+     *
+     * @param minY the floor, a multiple of 16 from -512 to -16
+     * @throws IllegalArgumentException when the dimension is already claimed by another generator or with another
+     *                                  floor (the same claim twice is allowed), or for an invalid floor or id
+     * @throws IllegalStateException    after the first server started
+     * @since API 5
+     */
+    public static void claimDimension(int dimensionId, int minY, String generatorId) {
+        DeepGenerators.claim(dimensionId, minY, generatorId);
+    }
+
+    /**
+     * The generator that claimed a dimension ({@link #claimDimension}), or null.
+     *
+     * @since API 5
+     */
+    public static String getDimensionOwner(int dimensionId) {
+        return DeepGenerators.owner(dimensionId);
     }
 
     /** Ids of the registered deep generators, in the order they run (fixed once the first server starts). */

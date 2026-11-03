@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
@@ -13,6 +14,7 @@ import net.minecraft.world.chunk.Chunk;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.akashiic.bellow.api.DeepConstants;
 import com.akashiic.bellow.api.IDeepGenerator;
 import com.akashiic.bellow.api.IDeepRegion;
 import com.akashiic.bellow.storage.GeneratorRecords;
@@ -24,6 +26,10 @@ import com.akashiic.bellow.world.LegacyGeneration;
  * session sees the same generators in the same order whatever order the mods loaded in. A generator that throws is
  * logged and skipped for that chunk; the chunk itself goes on. What each generator did to a chunk is recorded with the
  * chunk ({@link GeneratorRecords}).
+ * <p>
+ * A dimension can be claimed by the mod that owns it ({@link com.akashiic.bellow.api.BellowAPI#claimDimension}): it
+ * gets deep layers with the claimed floor, and only the claiming generator runs there; a generator that claimed
+ * dimensions runs only in them.
  */
 public final class DeepGenerators {
 
@@ -37,6 +43,12 @@ public final class DeepGenerators {
     /** Generators that apply to each world ({@link IDeepGenerator#appliesTo}), asked once per world. */
     private static final Map<World, Entry[]> perWorld = new WeakHashMap<>();
     private static final Entry[] NONE = {};
+    /**
+     * Claimed dimensions: the floor and the generator that owns each. Written only until the list is frozen; read
+     * without the class lock, because the floor is resolved under {@code DeepWorlds}' lock, and {@code appliesTo},
+     * asked under this one, may resolve a floor.
+     */
+    private static final Map<Integer, Claim> claims = new ConcurrentHashMap<>();
 
     private DeepGenerators() {}
 
@@ -54,6 +66,62 @@ public final class DeepGenerators {
             this.priority = priority;
             this.order = order;
         }
+    }
+
+    private static final class Claim {
+
+        final int minY;
+        final String owner;
+
+        Claim(int minY, String owner) {
+            this.minY = minY;
+            this.owner = owner;
+        }
+    }
+
+    public static synchronized void claim(int dimension, int minY, String owner) {
+        if (owner == null || owner.isEmpty())
+            throw new IllegalArgumentException("A dimension claim needs a generator id");
+        if (minY >= 0 || minY < DeepConstants.ABSOLUTE_MIN_Y || (minY & 15) != 0) {
+            throw new IllegalArgumentException(
+                "Floor " + minY
+                    + " of dimension "
+                    + dimension
+                    + " is not a multiple of 16 between "
+                    + DeepConstants.ABSOLUTE_MIN_Y
+                    + " and -16");
+        }
+        if (frozen) {
+            throw new IllegalStateException(
+                "Dimension " + dimension + " claimed too late: claim during preInit, init or postInit");
+        }
+        Claim claim = claims.get(dimension);
+        if (claim != null) {
+            if (claim.owner.equals(owner) && claim.minY == minY) return;
+            throw new IllegalArgumentException(
+                "Dimension " + dimension
+                    + " is already claimed by "
+                    + claim.owner
+                    + " (floor "
+                    + claim.minY
+                    + "); "
+                    + owner
+                    + " cannot claim it with floor "
+                    + minY);
+        }
+        claims.put(dimension, new Claim(minY, owner));
+    }
+
+    /** The generator that claimed a dimension, or null. */
+    public static String owner(int dimension) {
+        Claim claim = claims.get(dimension);
+        return claim == null ? null : claim.owner;
+    }
+
+    /** The claimed floor of a dimension, or null when it is not claimed. */
+    public static Integer claimedFloor(int dimension) {
+        Claim claim = claims.get(dimension);
+        return claim == null ? null : claim.minY;
     }
 
     public static synchronized void register(String id, IDeepGenerator generator, int priority) {
@@ -81,6 +149,23 @@ public final class DeepGenerators {
         } else {
             LOG.info("Deep generators, in order: {}", describe(entries.toArray(NONE)));
         }
+        for (Map.Entry<Integer, Claim> c : claims.entrySet()) {
+            boolean registered = false;
+            for (Entry e : entries) registered |= e.id.equals(c.getValue().owner);
+            if (registered) {
+                LOG.info(
+                    "Dimension {} is claimed by {}: floor {}, only that generator runs there",
+                    c.getKey(),
+                    c.getValue().owner,
+                    c.getValue().minY);
+            } else {
+                LOG.error(
+                    "Dimension {} is claimed by {}, which is not a registered deep generator: no generator runs there"
+                        + " (new chunks get the provisional layer, replaced once the generator is registered)",
+                    c.getKey(),
+                    c.getValue().owner);
+            }
+        }
     }
 
     public static synchronized List<String> ids() {
@@ -107,21 +192,50 @@ public final class DeepGenerators {
         if (!(world instanceof WorldServer)) return world == null ? entries.toArray(NONE) : NONE;
         Entry[] cached = perWorld.get(world);
         if (cached != null) return cached;
+        cached = select(world.provider.dimensionId, (WorldServer) world);
+        perWorld.put(world, cached);
+        return cached;
+    }
+
+    /**
+     * A claimed dimension gets its owner only, without asking anyone's {@code appliesTo}; a generator that claimed
+     * dimensions runs only in them; the others answer {@code appliesTo}.
+     */
+    private static Entry[] select(int dimension, WorldServer world) {
+        Claim claim = claims.get(dimension);
         List<Entry> list = new ArrayList<>();
         for (Entry e : entries) {
             boolean applies;
-            try {
-                applies = e.generator.appliesTo((WorldServer) world);
-            } catch (Throwable ex) {
-                rethrowFatal(ex);
-                LOG.error("Deep generator {} failed in appliesTo; skipping it in this world", e.id, ex);
+            if (claim != null) {
+                applies = e.id.equals(claim.owner);
+            } else if (ownsAny(e.id)) {
                 applies = false;
+            } else {
+                try {
+                    applies = e.generator.appliesTo(world);
+                } catch (Throwable ex) {
+                    rethrowFatal(ex);
+                    LOG.error("Deep generator {} failed in appliesTo; skipping it in this world", e.id, ex);
+                    applies = false;
+                }
             }
             if (applies) list.add(e);
         }
-        cached = list.toArray(NONE);
-        perWorld.put(world, cached);
-        return cached;
+        return list.toArray(NONE);
+    }
+
+    private static boolean ownsAny(String id) {
+        for (Claim c : claims.values()) if (c.owner.equals(id)) return true;
+        return false;
+    }
+
+    /** Tests only: the ids that run in a dimension (appliesTo asked with a null world). */
+    static synchronized List<String> idsForDimension(int dimension) {
+        freeze();
+        List<String> ids = new ArrayList<>();
+        if (hiddenForTests) return ids;
+        for (Entry e : select(dimension, null)) ids.add(e.id);
+        return ids;
     }
 
     /** Whether any generator applies to this world. */
@@ -271,6 +385,7 @@ public final class DeepGenerators {
     static synchronized void resetForTests() {
         entries.clear();
         perWorld.clear();
+        claims.clear();
         frozen = false;
     }
 }
