@@ -104,7 +104,12 @@ Estado por chunk (`Gen`): `0 NONE → 1 TERRAIN → 2 DECORATED`.
 3. **Bedrock legada** (Y 0..4, só `Blocks.bedrock`) → deepslate do Et Futurum (ou pedra), **só nas colunas em que os
    geradores deixaram Y −1 sólido**: abre o mundo antigo para a camada nova, como a 1.18 fez, mas um gerador que falhou
    ou deixou a camada vazia não abre um buraco para o vazio. É a única escrita do núcleo em Y ≥ 0 (a regra de ouro do
-   VitaGenesis, nunca escrever em Y ≥ 0, continua absoluta).
+   VitaGenesis, nunca escrever em Y ≥ 0, continua absoluta). Numa dimensão reclamada (API 6, issue #3) o dono escolhe o
+   bloco (`IDeepGenerator.legacyBedrockReplacement`/`…Meta`): o terreno dele em Y 0 (end stone na Mining), `null`
+   para o padrão ou `bedrock` para manter. As regras não mudam (só `bedrock`, só onde Y −1 ficou sólido, uma vez por
+   chunk). Como a escrita vai direto para a seção, sem atualizar luz, só vale bloco opaco inteiro, sem luz e sem tile
+   entity; outro bloco ou exceção recebe o padrão (aviso uma vez / erro no log). Em dimensão não reclamada ninguém é
+   consultado.
 * Retrogen: num mundo já explorado, todo chunk antigo é entregue aos geradores quando é carregado
   (`retrogen = true`), porque o terreno profundo é por chunk e não depende de vizinhos.
 
@@ -215,6 +220,7 @@ Garantias:
   * dono não registrado (id errado): erro no log, nenhum gerador roda na dimensão (camada provisória, trocada por
     retrogen quando o dono for registrado). Não derruba o servidor.
   * `getDimensionOwner(dimensionId)` e o `/bellow info` mostram o dono.
+  * o dono escolhe o que substitui a bedrock legada na dimensão dele (API 6, §5 item 3).
 * Uma exceção de um gerador é registrada no log (pilha completa nas 3 primeiras, depois só contagem) e o chunk segue;
   os geradores seguintes rodam no mesmo chunk. O que foi escrito antes da falha é marcado para salvar e reenviado
   (`finally`).
@@ -754,6 +760,36 @@ Validação (beta.5):
 | `tools/clienttest.sh` vanilla / compat / Angelica | 27 / 28 / 28 PASS, quadros PASS (o handshake do servidor integrado passa pela mesma verificação) |
 | Crucible (cópia de teste, pack inteiro) | 84 PASS |
 | self-test do VitaGenesis (API 3) contra a beta.5, piso −64 | bootstrap, full e reload PASS |
+
+### 10.7 Issue #3: o dono escolhe o que substitui a bedrock legada (beta.6, API 6)
+
+Caso real (ATM, relatado na issue): a Mining gerada com piso 0 (beta.4, sem reclamação) tem bedrock em Y 0 no meio da
+faixa de end stone; com a reclamação, o retrogen trocava essa bedrock por deepslate em todas as colunas. Agora o dono
+responde por posição.
+
+Teste (`ClaimProbe`, fase full): um chunk do End reclamado feito com os geradores escondidos (como uma dimensão ainda
+sem camada), com bedrock em Y 0..4 e a coluna 15,15 aberta em Y −1, passa pela etapa de terreno. O dono responde por
+altura. A camada de teste, que não é dona de nada, responde end stone no overworld.
+
+| verificação | resultado |
+|---|---|
+| Y 0: terreno do dono (end stone; lã meta 5 na metade oeste) | 255/255 colunas |
+| Y 1: `null` → padrão | 255/255 |
+| Y 2: `bedrock` → mantida | 255/255 |
+| Y 3: vidro (não opaco) → recusado, padrão, aviso uma vez | 255/255 |
+| Y 4: exceção → padrão; 3 rastros completos, depois só contagens em potências de 2 | 255/255 |
+| coluna aberta em Y −1 | mantém a bedrock em Y 0..4 (5/5) |
+| overworld (não reclamado): resposta da camada de teste ignorada | 245 colunas com o padrão em Y 0, 0 com end stone |
+
+| controle (correção desfeita) | o que reprova |
+|---|---|
+| dono ignorado (sempre o padrão) | Y 0 com o terreno do dono 0/255, Y 2 mantida 0/255 |
+| sem a checagem do bloco | o vidro é escrito (Y 3 com o padrão 0/255) |
+| qualquer gerador consultado onde não há dono | overworld com end stone da camada de teste em 255 colunas |
+
+Validação (beta.6): Forge puro e com o pacote de compatibilidade, full 74 PASS e verify 15 PASS; cliente vanilla 27 PASS
+e quadros PASS; Crucible (cópia de teste) 86 PASS, com as duas sondas novas; self-test do VitaGenesis (API 3) contra a
+beta.6: bootstrap, full e reload PASS.
 
 ## 11. Riscos abertos (beta)
 

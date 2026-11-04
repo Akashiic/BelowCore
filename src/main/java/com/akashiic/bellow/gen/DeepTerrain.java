@@ -60,7 +60,9 @@ public final class DeepTerrain {
      * After the generators' terrain step: the natural bedrock at Y 0..legacyBedrockMaxY that used to be the floor
      * becomes deepslate (or stone), opening the old world into the new layer (what 1.18 did when upgrading worlds). The
      * only write of the core at Y >= 0, and only where the generators left Y -1 solid: a generator that failed or left
-     * the layer empty must not open a hole into the void. Only {@code Blocks.bedrock} is touched.
+     * the layer empty must not open a hole into the void. Only {@code Blocks.bedrock} is touched. In a claimed
+     * dimension
+     * the owner chooses the replacement ({@link com.akashiic.bellow.api.IDeepGenerator#legacyBedrockReplacement}).
      */
     public static void replaceLegacyBedrock(Chunk chunk) {
         if (!GenConfig.replaceLegacyBedrock) return;
@@ -68,6 +70,8 @@ public final class DeepTerrain {
         ExtendedBlockStorage below = ((IDeepChunkInternal) chunk).bellow$getDeepSections()[DeepConstants.slot(-1)];
         if (bottom == null || below == null) return;
         Block replacement = DeepBlocks.legacyReplacement();
+        // in a claimed dimension the owner decides what replaces it (its terrain at Y 0, not deepslate)
+        DeepGenerators.Entry owner = DeepGenerators.ownerOf(chunk.worldObj);
         int maxY = Math.min(GenConfig.legacyBedrockMaxY, 15);
         boolean changed = false;
         for (int z = 0; z < 16; z++) {
@@ -76,12 +80,53 @@ public final class DeepTerrain {
                     .getMaterial() == Material.air) continue;
                 for (int y = 0; y <= maxY; y++) {
                     if (bottom.getBlockByExtId(x, y, z) != Blocks.bedrock) continue;
-                    bottom.func_150818_a(x, y, z, replacement);
-                    bottom.setExtBlockMetadata(x, y, z, 0);
+                    Block block = replacement;
+                    int meta = 0;
+                    if (owner != null) {
+                        Block chosen = null;
+                        int chosenMeta = 0;
+                        try {
+                            chosen = owner.generator.legacyBedrockReplacement(chunk, x, y, z);
+                            if (chosen != null)
+                                chosenMeta = owner.generator.legacyBedrockReplacementMeta(chunk, x, y, z);
+                        } catch (Throwable ex) {
+                            DeepGenerators.rethrowFatal(ex);
+                            DeepGenerators.failed(owner, "legacyBedrockReplacement", chunk, ex);
+                            chosen = null;
+                        }
+                        if (chosen == Blocks.bedrock) continue;
+                        if (chosen != null) {
+                            if (writable(chosen, chosenMeta)) {
+                                block = chosen;
+                                meta = chosenMeta;
+                            } else if (!owner.warnedReplacement) {
+                                owner.warnedReplacement = true;
+                                DeepGenerators.LOG.warn(
+                                    "Deep generator {} asked for {}:{} in place of the legacy bedrock of chunk {},{};"
+                                        + " only opaque full blocks without light or tile entity are written there (no"
+                                        + " light update): using the default. Logged once.",
+                                    owner.id,
+                                    Block.blockRegistry.getNameForObject(chosen),
+                                    chosenMeta,
+                                    chunk.xPosition,
+                                    chunk.zPosition);
+                            }
+                        }
+                    }
+                    bottom.func_150818_a(x, y, z, block);
+                    bottom.setExtBlockMetadata(x, y, z, meta);
                     changed = true;
                 }
             }
         }
         if (changed) chunk.setChunkModified();
+    }
+
+    /** Written straight into the section: nothing whose light or tile entity would need the World. */
+    private static boolean writable(Block block, int meta) {
+        return meta >= 0 && meta < 16
+            && block.isOpaqueCube()
+            && block.getLightValue() == 0
+            && !block.hasTileEntity(meta);
     }
 }

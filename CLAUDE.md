@@ -18,7 +18,7 @@
 - O trabalho vai para a branch `main` (pedido do usuário).
 
 ## Build e testes
-- `VERSION=0.1.0-beta.5 ./gradlew build` (não há tag git).
+- `VERSION=0.1.0-beta.6 ./gradlew build` (não há tag git).
 - `tools/selftest.sh [-Pbellow.compatRun=true]` (servidor, 3 fases) e `tools/clienttest.sh` (cliente headless).
 - Sonda de compatibilidade com mods reais: fases `compat`, `compatverify`, `compatrecheck` e `bench`
   (ver README e `docs/DESIGN.md` §10).

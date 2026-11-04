@@ -35,12 +35,14 @@ public final class BellowAPI {
      * the deep layer and receive its sections empty; the fill and host predicates of API 3 ({@code getFillBlock},
      * {@code getFillMeta}, {@code isDeepFill}, {@code isDeepHost}, {@code isBaseStone}) are gone. 5: dimensions claimed
      * by
-     * the mod that owns them ({@link #claimDimension}, {@link #getDimensionOwner}). Read at runtime: call
+     * the mod that owns them ({@link #claimDimension}, {@link #getDimensionOwner}). 6: the owner of a claimed dimension
+     * chooses what replaces the legacy bedrock there ({@link IDeepGenerator#legacyBedrockReplacement}). Read at
+     * runtime: call
      * {@link #apiVersion()} (a mod compiled against version 2 that runs with version 1 gets a {@code NoSuchMethodError}
      * it can catch, instead of a value copied in at compile time).
      */
     public static int apiVersion() {
-        return 5;
+        return 6;
     }
 
     /** Same as {@link #apiVersion()}; not a compile-time constant, so javac does not copy it into other mods. */

@@ -57,6 +57,12 @@ public final class TestLayer implements IDeepGenerator {
     /** Dimensions it generated in (a claimed dimension must not be among them). */
     public final Set<Integer> dims = new HashSet<>();
 
+    /** Not an owner: never asked (the claim probe checks the overworld kept Bellow's default). */
+    @Override
+    public Block legacyBedrockReplacement(Chunk chunk, int x, int y, int z) {
+        return Blocks.end_stone;
+    }
+
     @Override
     public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
         this.dims.add(chunk.worldObj.provider.dimensionId);

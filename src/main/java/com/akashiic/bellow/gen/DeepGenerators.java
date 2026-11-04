@@ -34,7 +34,7 @@ import com.akashiic.bellow.world.LegacyGeneration;
 public final class DeepGenerators {
 
     /** The mod's logger, by name: this class must load without the mod class (unit tests). */
-    private static final Logger LOG = LogManager.getLogger("AkashicBellow");
+    static final Logger LOG = LogManager.getLogger("AkashicBellow");
     /** Full stack traces per generator before errors are only counted. */
     private static final int TRACED_ERRORS = 3;
 
@@ -59,6 +59,7 @@ public final class DeepGenerators {
         final int priority;
         final int order;
         int errors;
+        boolean warnedReplacement;
 
         Entry(String id, IDeepGenerator generator, int priority, int order) {
             this.id = id;
@@ -371,7 +372,16 @@ public final class DeepGenerators {
         if (ex instanceof VirtualMachineError) throw (VirtualMachineError) ex;
     }
 
-    private static void failed(Entry e, String step, Chunk chunk, Throwable ex) {
+    /** The registered generator that claimed the dimension of a world, or null (none, or not registered). */
+    static Entry ownerOf(World world) {
+        if (world == null || world.provider == null || hiddenForTests) return null;
+        Claim claim = claims.get(world.provider.dimensionId);
+        if (claim == null) return null;
+        Entry[] list = forWorld(world);
+        return list.length == 1 && list[0].id.equals(claim.owner) ? list[0] : null;
+    }
+
+    static void failed(Entry e, String step, Chunk chunk, Throwable ex) {
         int n = ++e.errors;
         String where = "chunk " + chunk.xPosition + "," + chunk.zPosition;
         if (n <= TRACED_ERRORS) {
