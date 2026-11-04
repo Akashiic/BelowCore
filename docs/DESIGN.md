@@ -43,11 +43,12 @@ teto vanilla (256) intocado, e **nenhuma mudança no caminho Y ≥ 0**.
   (o leitor do ChunkAPI/vanilla faria `array[Y]` com Y negativo → exceção → chunk regenerado).
   ```
   akashicbellow: { deep: { V: 1, Gen: byte, L: byte (luz pendente, só quando 1), P: byte (camada provisória, só quando 1),
+                            R: byte (Y 0..4 trocado por ar/fluido, luz pendente; só quando 1),
                             Gens: { "<id do gerador>": { S: etapas feitas, F: etapas que falharam,
                                                          E: falhas de callback, V: versão, Data: {…} } },
                             Sections: [ {Y: byte(com sinal), <managers do ChunkAPI>} ] } }
   ```
-  `L`, `P` (§5) e `Gens` (§5.1) entraram sem subir `V`: versões anteriores ignoram as duas chaves (e as descartam ao salvar de
+  `L`, `P`, `R` (§5) e `Gens` (§5.1) entraram sem subir `V`: versões anteriores ignoram as duas chaves (e as descartam ao salvar de
   novo). Registros de geradores ausentes nesta sessão são mantidos e regravados intactos. Na leitura e no save eles
   são copiados: um chunk recarregado com o save ainda na fila é lido do mesmo compound que a thread de IO grava.
   Cada seção é serializada por `DataRegistryImpl.writeSubChunkToNBT`, ou seja, pelos mesmos managers que gravam as
@@ -107,8 +108,19 @@ Estado por chunk (`Gen`): `0 NONE → 1 TERRAIN → 2 DECORATED`.
    VitaGenesis, nunca escrever em Y ≥ 0, continua absoluta). Numa dimensão reclamada (API 6, issue #3) o dono escolhe o
    bloco (`IDeepGenerator.legacyBedrockReplacement`/`…Meta`): o terreno dele em Y 0 (end stone na Mining), `null`
    para o padrão ou `bedrock` para manter. As regras não mudam (só `bedrock`, só onde Y −1 ficou sólido, uma vez por
-   chunk). Como a escrita vai direto para a seção, sem atualizar luz, só vale bloco opaco inteiro, sem luz e sem tile
-   entity; outro bloco ou exceção recebe o padrão (aviso uma vez / erro no log). Em dimensão não reclamada ninguém é
+   chunk). Bloco opaco inteiro, sem luz e sem tile entity vai direto para a seção. Desde a API 7 (issue #4, a The Other
+   tem cavernas em Y 0), o dono:
+   * também é consultado onde Y −1 ficou aberto, se o `generateTerrain` dele rodou sem exceção nesse chunk (ele sabe se
+     é caverna ou vazio). Ali, `null`, bloco recusado ou exceção mantêm a bedrock: a trava contra abrir buraco para o
+     vazio continua para o caso de falha;
+   * pode responder ar ou fonte de fluido (meta 0). Essas posições ficam marcadas (`R`, salvo com o chunk) e a altura
+     da coluna desce se aquela bedrock era o topo (`heightMap`; o `generateHeightMap` é só do cliente e o
+     `generateSkylightMap` reescreveria a luz do céu do chunk). Na etapa de luz (5×5 carregado e decorado, fora de
+     qualquer carga de chunk), o `World` acende ar e fluidos de Y 0..4 (`func_147451_t`, luz do céu e de bloco, com a
+     propagação dele) e a seção 0 é reenviada a quem já tinha o chunk (`S21` parcial, como o Forge faz quando muitos
+     blocos mudam num tick, com as descrições dos tile entities). Um fluido só escorre quando algo ao lado muda.
+
+   Outro bloco ou exceção recebe o padrão (aviso uma vez / erro no log). Em dimensão não reclamada ninguém é
    consultado.
 * Retrogen: num mundo já explorado, todo chunk antigo é entregue aos geradores quando é carregado
   (`retrogen = true`), porque o terreno profundo é por chunk e não depende de vizinhos.
@@ -790,6 +802,39 @@ altura. A camada de teste, que não é dona de nada, responde end stone no overw
 Validação (beta.6): Forge puro e com o pacote de compatibilidade, full 74 PASS e verify 15 PASS; cliente vanilla 27 PASS
 e quadros PASS; Crucible (cópia de teste) 86 PASS, com as duas sondas novas; self-test do VitaGenesis (API 3) contra a
 beta.6: bootstrap, full e reload PASS.
+
+### 10.8 Issue #4: ar, fluidos e colunas abertas (beta.7, API 7)
+
+Caso real (ATM, The Other com piso 0 e depois reclamada): 5832 colunas com caverna em Y 0 e Y −1 ficavam com uma placa
+de bedrock (dono não consultado em coluna aberta) e 867 viravam deepslate (ar recusado). `ClaimProbe`:
+
+| verificação | resultado |
+|---|---|
+| chunk 310 (API 6), coluna aberta em Y −1 com o terreno do dono bem-sucedido | consultada: end stone em Y 0; `null`, vidro e exceção mantêm a bedrock em Y 1..4 |
+| chunk 320: Y 0 ar (metade oeste, inclusive a fileira aberta), água e lava fonte (leste) | 128/128 ar, 64/64 água, 64/64 lava |
+| Y 1 água meta 3 (não fonte) | recusada: padrão 119/119 nas colunas sólidas, bedrock mantida 8/8 nas abertas |
+| coluna aberta de Y 0 a 4 / coluna coberta ao lado | altura 0 / 5 |
+| luz de bloco do ar ao lado da lava | 14 depois da etapa de luz (lava 15); marca `R` limpa; pacote da seção 0 serializado. Antes da etapa: 0 no Forge puro; 14 com o ArchaicFix, cujo motor de luz já processou, ao ler, as verificações deixadas pelos `setBlock` do próprio teste (um chunk lido do disco não tem nenhuma; por isso o antes só é relatado) |
+| (verify, JVM nova) | lava, ar e luz 14 mantidos, marca limpa |
+| chunk 330: `generateTerrain` do dono lança | colunas sólidas consultadas (255/255); a aberta mantém a bedrock |
+
+O último teste pegou um erro meu antes do commit: um terreno que falhou também conta como feito em `S` (para não ser
+repetido), então a condição precisa olhar `F` também.
+
+| controle (correção desfeita) | o que reprova |
+|---|---|
+| coluna aberta não consultada (API 6) | sem terreno do dono na coluna aberta; 8 de ar e 8 de água a menos na fileira aberta |
+| sem o reacendimento | luz 0 também na própria lava, antes e depois da etapa, e depois do reinício |
+| falha do terreno do dono ignorada (o erro pego acima) | coluna aberta recebe end stone |
+| sem baixar a altura | coluna aberta de 0 a 4 fica com altura 5 |
+| qualquer fluido aceito (não só fonte) | água meta 3 escrita: 0/119 padrão, 0/8 bedrock mantida |
+
+Validação (beta.7): Forge puro e com o pacote de compatibilidade, full 77 PASS e verify 16 PASS; clientes vanilla /
+compat / Angelica 27 / 28 / 28 PASS, quadros PASS; Crucible (cópia de teste) 89 PASS; self-test do VitaGenesis (API 3)
+contra a beta.7: bootstrap, full e reload PASS.
+
+O reenvio da seção 0 para jogadores não é exercitado aqui (o self-test do servidor não tem jogadores): o caminho é o
+do próprio Forge para muitas mudanças num tick, e o pacote é serializado no teste.
 
 ## 11. Riscos abertos (beta)
 

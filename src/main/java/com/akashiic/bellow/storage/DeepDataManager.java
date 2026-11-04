@@ -161,6 +161,8 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         if (state.bellow$isLightPending()) nbt.setByte("L", (byte) 1);
         // the core's provisional layer, still to be replaced by a generator (also added without raising the format)
         if (state.bellow$isProvisional()) nbt.setByte("P", (byte) 1);
+        // legacy bedrock replaced with air or a fluid by a dimension's owner, still to be lit (same)
+        if (state.bellow$isLegacyRelight()) nbt.setByte("R", (byte) 1);
         NBTTagCompound records = state.bellow$getGeneratorRecords();
         // a copy: the compound is written later on the file IO thread, while the main thread keeps updating records
         if (records != null && !records.hasNoTags()) nbt.setTag("Gens", records.copy());
@@ -206,6 +208,7 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         deep.bellow$setGenState(nbt.getByte("Gen"));
         deep.bellow$setLightPending(nbt.getByte("L") != 0);
         deep.bellow$setProvisional(nbt.getByte("P") != 0);
+        deep.bellow$setLegacyRelight(nbt.getByte("R") != 0);
         // copied: a chunk loaded again while its save is still queued is read from the very compound being written
         deep.bellow$setGeneratorRecords(
             nbt.hasKey("Gens", 10) ? (NBTTagCompound) nbt.getCompoundTag("Gens")
@@ -264,6 +267,7 @@ public final class DeepDataManager implements DataManager.ChunkDataManager, Data
         dst.bellow$setFromDisk(src.bellow$isFromDisk());
         dst.bellow$setLightPending(srcState.bellow$isLightPending());
         dst.bellow$setProvisional(srcState.bellow$isProvisional());
+        dst.bellow$setLegacyRelight(srcState.bellow$isLegacyRelight());
         NBTTagCompound records = srcState.bellow$getGeneratorRecords();
         dst.bellow$setGeneratorRecords(records == null ? null : (NBTTagCompound) records.copy());
         ExtendedBlockStorage[] sections = src.bellow$peekDeepSections();

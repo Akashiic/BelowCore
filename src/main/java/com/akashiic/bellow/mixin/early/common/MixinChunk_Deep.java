@@ -55,6 +55,9 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDeepChunkInternal,
     private boolean bellow$provisional;
 
     @Unique
+    private boolean bellow$legacyRelight;
+
+    @Unique
     private NBTTagCompound bellow$generators;
 
     @Unique
@@ -134,6 +137,16 @@ public abstract class MixinChunk_Deep implements IDeepChunk, IDeepChunkInternal,
     @Override
     public void bellow$setProvisional(boolean provisional) {
         this.bellow$provisional = provisional;
+    }
+
+    @Override
+    public boolean bellow$isLegacyRelight() {
+        return this.bellow$legacyRelight;
+    }
+
+    @Override
+    public void bellow$setLegacyRelight(boolean relight) {
+        this.bellow$legacyRelight = relight;
     }
 
     @Override

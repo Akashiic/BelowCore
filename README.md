@@ -5,7 +5,7 @@ rede, luz, compatibilidade e a API para geradores. O BelowCore **não gera conte
 profunda é (deepslate, piso de bedrock, minérios, cavernas) vem de um gerador registrado na API; no TEOF, do
 **VitaGenesis**.
 
-Status: **beta** (`0.1.0-beta.6`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
+Status: **beta** (`0.1.0-beta.7`). Veja os riscos abertos em [docs/DESIGN.md §11](docs/DESIGN.md#11-riscos-abertos-beta).
 
 ## O que faz
 
@@ -88,7 +88,7 @@ Desinstalar: o mundo continua abrindo, mas tudo abaixo de Y 0 é perdido.
 
 Cada push no `main` roda o workflow **Build**, que gera do mesmo commit o mod e o agent do WorldEdit (companion) e
 publica os dois como artifacts do mesmo run, sem zip: `AkashicBellow-<versão>.jar` e
-`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.6-<commit>`. O resumo do run lista o
+`AkashicBellow-WorldEdit-6.1.9-<versão>-agent.jar`, com `<versão>` = `0.1.0-beta.7-<commit>`. O resumo do run lista o
 SHA-256 de cada jar.
 
 ## Compilar e testar
@@ -117,7 +117,7 @@ os screenshots em `run/client/screenshots/`.
 
 ## API
 
-`com.akashiic.bellow.api.BellowAPI` (versão da API 6, em `BellowAPI.apiVersion()`):
+`com.akashiic.bellow.api.BellowAPI` (versão da API 7, em `BellowAPI.apiVersion()`):
 
 * Leitura: `getMinY(world)`, `hasDeepLayers(world)`, `getDeepSection(chunk, sectionY)`, para mods que iteram seções
   diretamente e querem enxergar o subsolo. `IDeepChunk`/`IDeepWorld` são somente leitura.
@@ -141,14 +141,15 @@ os screenshots em `run/client/screenshots/`.
   outro gerador ou outro piso é erro na inicialização; a mesma chamada duas vezes é aceita.
   `getDimensionOwner(dimensionId)` diz quem reclamou (também no `/bellow info`).
   API 6: o dono escolhe o que substitui a bedrock legada em Y 0..4 na dimensão dele
-  (`IDeepGenerator.legacyBedrockReplacement`/`legacyBedrockReplacementMeta`; `null` = padrão, `bedrock` = manter; só
-  bloco opaco inteiro, sem luz e sem tile entity).
+  (`IDeepGenerator.legacyBedrockReplacement`/`legacyBedrockReplacementMeta`; `null` = padrão, `bedrock` = manter;
+  bloco opaco inteiro, sem luz e sem tile entity). API 7: também onde Y −1 ficou aberto (se o terreno do dono deu
+  certo no chunk; ali `null` mantém a bedrock) e com ar ou fonte de fluido, acesos pelo `World` na etapa de luz.
 * `resendDeepSections(world, chunk, slotMask)`: reenvia seções escritas diretamente aos jogadores que já receberam o
   chunk.
 * Para testar um gerador: `worldgen.strictGenerators=true` recusa (e registra) escritas pelo `World` que o contrato
   proíbe durante `generateTerrain`/`decorate`; num self-test sem ticks, `runDeepStages(world)` roda na hora as etapas
   de depois do tick.
 
-Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 6` (ou a versão de
+Para depender da API, declare `required-after:akashicbellow` e confira `BellowAPI.apiVersion() >= 7` (ou a versão de
 que precisa) em tempo de execução, dentro de um `try`/`catch (NoSuchMethodError e)` (a API 1 não tem o método). Não compare a versão do mod:
 os builds de CI levam o sufixo do commit.

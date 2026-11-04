@@ -154,7 +154,8 @@ public final class DeepStages {
         }
         IDeepChunkInternal state = (IDeepChunkInternal) c;
         boolean light = state.bellow$isLightPending();
-        if (!light && !DeepGenerators.pending(world, c, GeneratorRecords.ON_LIT)) return;
+        boolean legacy = state.bellow$isLegacyRelight();
+        if (!light && !legacy && !DeepGenerators.pending(world, c, GeneratorRecords.ON_LIT)) return;
         Chunk[] core = new Chunk[9];
         for (int dz = -2; dz <= 2; dz++) {
             for (int dx = -2; dx <= 2; dx++) {
@@ -185,8 +186,54 @@ public final class DeepStages {
             state.bellow$setLightPending(false);
             c.setChunkModified();
         }
+        if (legacy) {
+            try {
+                relightLegacyBand(world, c);
+            } catch (Throwable e) {
+                DeepGenerators.rethrowFatal(e);
+                int n = ++lightErrors;
+                if (n <= TRACED_ERRORS || Integer.bitCount(n) == 1) {
+                    AkashicBellow.LOG.error(
+                        "Light of the replaced legacy bedrock failed for chunk [{}, {}] in dimension {} (error {})",
+                        cx,
+                        cz,
+                        world.provider.dimensionId,
+                        n,
+                        e);
+                }
+                return;
+            }
+            state.bellow$setLegacyRelight(false);
+            c.setChunkModified();
+        }
         flush(world, q); // the light first: onLit may rely on players having it
+        if (legacy) resendSections(world, c, 1); // Y 0..15: the light computed now
         DeepGenerators.onLit(world, c);
+    }
+
+    /**
+     * Air and fluid sources the owner of a claimed dimension put in place of the legacy bedrock: the World lights them
+     * (sky and block light, its own rules and propagation), now that the 5x5 around is loaded (light updates reach 17
+     * blocks) and nothing is being loaded.
+     */
+    static void relightLegacyBand(WorldServer world, Chunk c) {
+        int maxY = Math.min(GenConfig.legacyBedrockMaxY, 15);
+        int x0 = c.xPosition << 4, z0 = c.zPosition << 4;
+        for (int y = 0; y <= maxY; y++) for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
+            net.minecraft.block.Block b = c.getBlock(x, y, z);
+            if (b == net.minecraft.init.Blocks.air || b.getMaterial()
+                .isLiquid()) world.func_147451_t(x0 + x, y, z0 + z);
+        }
+    }
+
+    /** Sends vanilla sections of a chunk again to the players that already received it. */
+    static void resendSections(WorldServer world, Chunk chunk, int sectionMask) {
+        net.minecraft.util.LongHashMap instances = ((com.akashiic.bellow.mixin.early.common.PlayerManagerAccessor) world
+            .getPlayerManager()).bellow$getPlayerInstances();
+        long key = (long) chunk.xPosition + 2147483647L | (long) chunk.zPosition + 2147483647L << 32;
+        Object instance = instances.getValueByKey(key);
+        if (instance != null)
+            ((com.akashiic.bellow.net.IDeepPlayerInstance) instance).bellow$resendSections(sectionMask);
     }
 
     /** Self test only: the sections of a chunk waiting to be sent after the tick (0 for none). */

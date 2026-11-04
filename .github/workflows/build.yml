@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 env:
-  BASE_VERSION: 0.1.0-beta.6
+  BASE_VERSION: 0.1.0-beta.7
 
 jobs:
   build:

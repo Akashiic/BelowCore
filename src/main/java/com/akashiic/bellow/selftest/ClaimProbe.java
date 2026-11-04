@@ -20,6 +20,7 @@ import com.akashiic.bellow.api.IDeepGenerator;
 import com.akashiic.bellow.gen.DeepBlocks;
 import com.akashiic.bellow.gen.DeepGen;
 import com.akashiic.bellow.gen.DeepGenerators;
+import com.akashiic.bellow.storage.IDeepChunkInternal;
 
 /**
  * A dimension claimed by the mod that owns it ({@link BellowAPI#claimDimension}): the End (dimension 1), which is not
@@ -35,6 +36,10 @@ public final class ClaimProbe implements IDeepGenerator {
     private static final int CX = 300;
     /** Chunk of the legacy bedrock check: bedrock at Y 0..4, column 15,15 left open at Y -1. */
     private static final int LX = 310;
+    /** Chunk of the API 7 check (air and fluids, light): bedrock at Y 0..4, row z = 0 open at Y -1. */
+    private static final int AX = 320;
+    /** Chunk where the owner's terrain step fails: its open column must keep the bedrock. */
+    private static final int FX = 330;
 
     private static final ClaimProbe INSTANCE = new ClaimProbe();
     private final Set<Integer> dims = new HashSet<>();
@@ -73,6 +78,8 @@ public final class ClaimProbe implements IDeepGenerator {
     public void generateTerrain(Chunk chunk, int minY, long seed, boolean retrogen) {
         this.dims.add(chunk.worldObj.provider.dimensionId);
         this.calls++;
+        if (chunk.xPosition == FX && chunk.zPosition == FX)
+            throw new IllegalStateException("self test: failing terrain");
         for (int sy = minY >> 4; sy < 0; sy++) {
             ExtendedBlockStorage ebs = BellowAPI.getDeepSection(chunk, sy);
             if (ebs == null) continue;
@@ -81,6 +88,7 @@ public final class ClaimProbe implements IDeepGenerator {
                 if (ebs.getBlockByExtId(x, ly, z) != Blocks.air) continue;
                 if (chunk.xPosition == LX && chunk.zPosition == LX && x == 15 && z == 15 && (sy << 4) + ly == -1)
                     continue;
+                if (chunk.xPosition == AX && chunk.zPosition == AX && z == 0 && (sy << 4) + ly == -1) continue;
                 ebs.func_150818_a(x, ly, z, (sy << 4) + ly == minY ? Blocks.obsidian : Blocks.stone);
             }
         }
@@ -93,6 +101,16 @@ public final class ClaimProbe implements IDeepGenerator {
      */
     @Override
     public Block legacyBedrockReplacement(Chunk chunk, int x, int y, int z) {
+        if (chunk.xPosition == FX && chunk.zPosition == FX) return Blocks.end_stone;
+        if (chunk.xPosition == AX && chunk.zPosition == AX) {
+            // API 7: Y 0 air in the west half, water / lava sources in the east; Y 1 a water that is not a source;
+            // column
+            // 0,15 air all the way (its height map must go down)
+            if (x == 0 && z == 15) return Blocks.air;
+            if (y == 0) return x < 8 ? Blocks.air : z < 8 ? Blocks.water : Blocks.lava;
+            if (y == 1 && x < 8) return Blocks.water;
+            return Blocks.end_stone;
+        }
         switch (y) {
             case 0:
                 return x < 8 ? Blocks.wool : Blocks.end_stone;
@@ -109,13 +127,14 @@ public final class ClaimProbe implements IDeepGenerator {
 
     @Override
     public int legacyBedrockReplacementMeta(Chunk chunk, int x, int y, int z) {
+        if (chunk.xPosition == AX && chunk.zPosition == AX) return y == 1 && x < 8 ? 3 : 0;
         return y == 0 && x < 8 ? 5 : 0;
     }
 
     public static void run(BukkitProbe.Check check) {
         WorldServer end = MinecraftServer.getServer()
             .worldServerForDimension(DIM);
-        check.check("API version", BellowAPI.apiVersion() == 6, "apiVersion " + BellowAPI.apiVersion());
+        check.check("API version", BellowAPI.apiVersion() == 7, "apiVersion " + BellowAPI.apiVersion());
         check.check(
             "dimension claims: conflicting and invalid claims refused, the same claim twice allowed",
             registrationOk,
@@ -212,7 +231,9 @@ public final class ClaimProbe implements IDeepGenerator {
             if (c.getBlock(x, 3, z) == def) y3++;
             if (c.getBlock(x, 4, z) == def) y4++;
         }
-        for (int y = 0; y <= 4; y++) if (c.getBlock(15, y, 15) == Blocks.bedrock) open++;
+        // open at Y -1, but the owner's terrain step succeeded: asked too (API 7); null, glass and an exception keep
+        boolean openOwn = c.getBlock(15, 0, 15) == Blocks.end_stone;
+        for (int y = 1; y <= 4; y++) if (c.getBlock(15, y, 15) == Blocks.bedrock) open++;
         check.check(
             "the owner of a claimed dimension chooses what replaces the legacy bedrock",
             before == DeepConstants.GEN_NONE && y0 == 255
@@ -220,7 +241,8 @@ public final class ClaimProbe implements IDeepGenerator {
                 && y2 == 255
                 && y3 == 255
                 && y4 == 255
-                && open == 5,
+                && openOwn
+                && open == 4,
             "of 255 columns: Y 0 own terrain " + y0
                 + ", Y 1 default "
                 + y1
@@ -230,9 +252,11 @@ public final class ClaimProbe implements IDeepGenerator {
                 + y3
                 + ", Y 4 exception "
                 + y4
-                + "; column open at Y -1 keeps "
+                + "; column open at Y -1: own terrain at Y 0 "
+                + openOwn
+                + ", bedrock kept at Y 1..4 "
                 + open
-                + "/5");
+                + "/4");
         Chunk overworld = MinecraftServer.getServer()
             .worldServerForDimension(0)
             .getChunkFromChunkCoords(1000, 1000);
@@ -246,6 +270,126 @@ public final class ClaimProbe implements IDeepGenerator {
             "a generator that owns no dimension does not choose the replacement",
             chosen == 0 && defaults > 0,
             "overworld chunk 1000,1000 at Y 0: " + defaults + " default, " + chosen + " from the test layer");
+        airAndFluids(end, check);
+        failedOwner(end, check);
+    }
+
+    /** The owner's terrain step failed in this chunk: it is still asked where Y -1 is solid, not where it is open. */
+    private static void failedOwner(WorldServer end, BukkitProbe.Check check) {
+        Chunk c;
+        DeepGenerators.hideForTests(true);
+        try {
+            c = end.getChunkProvider()
+                .loadChunk(FX, FX);
+            for (int i = 0; i < 256; i++)
+                end.setBlock((FX << 4) + (i & 15), 0, (FX << 4) + (i >> 4), Blocks.bedrock, 0, 2);
+            end.setBlock((FX << 4) + 15, -1, (FX << 4) + 15, Blocks.air, 0, 2);
+        } finally {
+            DeepGenerators.hideForTests(false);
+        }
+        DeepGen.onChunkLoad(c);
+        int solid = 0;
+        for (int i = 0; i < 255; i++) if (c.getBlock(i & 15, 0, i >> 4) == Blocks.end_stone) solid++;
+        Block open = c.getBlock(15, 0, 15);
+        check.check(
+            "an owner whose terrain step failed is not asked where Y -1 is open",
+            solid == 255 && open == Blocks.bedrock,
+            "solid columns with the owner's answer " + solid
+                + "/255, open column at Y 0: "
+                + Block.blockRegistry.getNameForObject(open));
+    }
+
+    /**
+     * API 7: air and fluid sources in place of the legacy bedrock, also in columns open at Y -1, lit by the World at
+     * the
+     * light stage. The air next to the lava (light 15) must reach 14 once the 5x5 around the chunk is decorated.
+     */
+    private static void airAndFluids(WorldServer end, BukkitProbe.Check check) {
+        Chunk c;
+        DeepGenerators.hideForTests(true);
+        try {
+            c = end.getChunkProvider()
+                .loadChunk(AX, AX);
+            for (int i = 0; i < 256; i++) for (int y = 0; y <= 4; y++)
+                end.setBlock((AX << 4) + (i & 15), y, (AX << 4) + (i >> 4), Blocks.bedrock, 0, 2);
+            for (int x = 0; x < 16; x++) end.setBlock((AX << 4) + x, -1, AX << 4, Blocks.air, 0, 2);
+        } finally {
+            DeepGenerators.hideForTests(false);
+        }
+        DeepGen.onChunkLoad(c);
+        Block def = DeepBlocks.legacyReplacement();
+        int air = 0, water = 0, lava = 0, notSourceDefault = 0, notSourceKept = 0;
+        for (int i = 0; i < 256; i++) {
+            int x = i & 15, z = i >> 4;
+            Block b0 = c.getBlock(x, 0, z), b1 = c.getBlock(x, 1, z);
+            if (x < 8 && b0 == Blocks.air) air++;
+            if (x >= 8 && z < 8 && b0 == Blocks.water && c.getBlockMetadata(x, 0, z) == 0) water++;
+            if (x >= 8 && z >= 8 && b0 == Blocks.lava && c.getBlockMetadata(x, 0, z) == 0) lava++;
+            if (x < 8 && z > 0 && b1 == def && !(x == 0 && z == 15)) notSourceDefault++;
+            if (x < 8 && z == 0 && b1 == Blocks.bedrock) notSourceKept++;
+        }
+        IDeepChunkInternal state = (IDeepChunkInternal) c;
+        boolean flagged = state.bellow$isLegacyRelight();
+        int height = c.heightMap[15 << 4], heightCovered = c.heightMap[15 << 4 | 1];
+        int wx = (AX << 4) + 7, wz = (AX << 4) + 12;
+        int darkBefore = end.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, wx, 0, wz);
+        check.check(
+            "the owner of a claimed dimension can answer air and fluid sources (API 7)",
+            air == 128 && water == 64
+                && lava == 64
+                && notSourceDefault == 119
+                && notSourceKept == 8
+                && flagged
+                && height == 0
+                && heightCovered == 5,
+            "Y 0: air " + air
+                + "/128 (8 of them in the row open at Y -1), water source "
+                + water
+                + "/64, lava source "
+                + lava
+                + "/64; Y 1 water meta 3 refused: default "
+                + notSourceDefault
+                + "/119, kept where open "
+                + notSourceKept
+                + "/8; light pending "
+                + flagged
+                + "; height map of the column opened all the way "
+                + height
+                + " (covered column next to it "
+                + heightCovered
+                + ")");
+        for (int cx = AX - 3; cx <= AX + 3; cx++) for (int cz = AX - 3; cz <= AX + 3; cz++) end.getChunkProvider()
+            .loadChunk(cx, cz);
+        BellowAPI.runDeepStages(end);
+        BellowAPI.runDeepStages(end);
+        int lit = end.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, wx, 0, wz);
+        int lavaLight = end.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, wx + 1, 0, wz);
+        int bytes = -1;
+        try {
+            io.netty.buffer.ByteBuf buf = io.netty.buffer.Unpooled.buffer();
+            new net.minecraft.network.play.server.S21PacketChunkData(c, false, 1)
+                .writePacketData(new net.minecraft.network.PacketBuffer(buf));
+            bytes = buf.readableBytes();
+            buf.release();
+        } catch (Exception e) {
+            com.akashiic.bellow.AkashicBellow.LOG.error("self test: section packet", e);
+        }
+        check.check(
+            "air and fluids in place of the legacy bedrock are lit by the World at the light stage",
+            // the light before the stage is reported only: ArchaicFix's engine may already have lit these positions
+            // with
+            // the light checks this test's own setBlock calls left queued (a chunk loaded from disk has none)
+            lit == 14 && lavaLight == 15 && !state.bellow$isLegacyRelight() && bytes > 0,
+            "block light of the air next to the lava: " + darkBefore
+                + " before the light stage, "
+                + lit
+                + " after (lava "
+                + lavaLight
+                + "); light pending "
+                + state.bellow$isLegacyRelight()
+                + "; section packet "
+                + bytes
+                + " bytes");
     }
 
     /** Phase verify: claimed with -32 now, the save keeps the -48 it locked. */
@@ -258,6 +402,23 @@ public final class ClaimProbe implements IDeepGenerator {
             Chunk c = end.getChunkProvider()
                 .loadChunk(CX, CX);
             kept = c.getBlock(8, FLOOR, 8) == Blocks.obsidian;
+        }
+        if (end != null) {
+            Chunk a = end.getChunkProvider()
+                .loadChunk(AX, AX);
+            int lit = end.getSavedLightValue(net.minecraft.world.EnumSkyBlock.Block, (AX << 4) + 7, 0, (AX << 4) + 12);
+            check.check(
+                "air, fluids and their light in place of the legacy bedrock survive a restart",
+                a.getBlock(8, 0, 12) == Blocks.lava && a.getBlock(7, 0, 12) == Blocks.air
+                    && lit == 14
+                    && !((IDeepChunkInternal) a).bellow$isLegacyRelight(),
+                "lava " + (a.getBlock(8, 0, 12) == Blocks.lava)
+                    + ", air "
+                    + (a.getBlock(7, 0, 12) == Blocks.air)
+                    + ", light "
+                    + lit
+                    + ", light pending "
+                    + ((IDeepChunkInternal) a).bellow$isLegacyRelight());
         }
         check.check(
             "a claimed dimension keeps the floor locked in its save",

@@ -116,17 +116,20 @@ public interface IDeepGenerator {
 
     /**
      * Only asked of the generator that claimed the dimension ({@link BellowAPI#claimDimension}): what replaces the
-     * legacy bedrock at {@code (x, y, z)} of this chunk ({@code x} and {@code z} chunk-local), where Bellow replaces it
-     * right after {@link #generateTerrain}: {@code Blocks.bedrock} at {@code 0 <= y <= worldgen.legacyBedrockMaxY}, in
-     * columns whose Y -1 the generators left solid, once per chunk. Same contract as {@link #generateTerrain}: this
-     * chunk only, a function of the seed and the position.
+     * legacy bedrock at {@code (x, y, z)} of this chunk ({@code x} and {@code z} chunk-local), right after
+     * {@link #generateTerrain}: {@code Blocks.bedrock} at {@code 0 <= y <= worldgen.legacyBedrockMaxY}, once per chunk.
+     * Asked in columns whose Y -1 the generators left solid and, since API 7, also where Y -1 is open when this
+     * generator's {@link #generateTerrain} succeeded in this chunk (it knows a cave from the void). Same contract as
+     * {@link #generateTerrain}: this chunk only, a function of the seed and the position.
      * <p>
-     * Return null for Bellow's default (Et Futurum's deepslate, else stone), {@code Blocks.bedrock} to keep it, or an
-     * opaque full block that gives no light and has no tile entity: it is written straight into the section, without
-     * light updates. Anything else, or an exception, gets the default (logged). Not asked in other dimensions, nor when
+     * Return null for Bellow's default (Et Futurum's deepslate, else stone; where Y -1 is open: keep the bedrock),
+     * {@code Blocks.bedrock} to keep it, an opaque full block that gives no light and has no tile entity, or (API 7)
+     * {@code Blocks.air} or a fluid source (metadata 0). Air and fluids are lit by the World at the light stage (when
+     * the 5x5 around is decorated) and the section is sent again to players; a fluid only flows once something next to
+     * it changes. Anything else, or an exception, gets the default (logged). Not asked in other dimensions, nor when
      * {@code worldgen.replaceLegacyBedrock} is off.
      *
-     * @since API 6
+     * @since API 6 (open columns, air and fluids: API 7)
      */
     default Block legacyBedrockReplacement(Chunk chunk, int x, int y, int z) {
         return null;

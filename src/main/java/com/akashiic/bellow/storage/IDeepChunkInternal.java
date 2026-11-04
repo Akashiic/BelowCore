@@ -27,6 +27,15 @@ public interface IDeepChunkInternal {
 
     void bellow$setProvisional(boolean provisional);
 
+    /**
+     * The owner of a claimed dimension replaced legacy bedrock at Y 0..4 with air or a fluid: those positions are lit
+     * by
+     * the World's light engine at the light stage, and the section sent again.
+     */
+    boolean bellow$isLegacyRelight();
+
+    void bellow$setLegacyRelight(boolean relight);
+
     /** The chunk still waits for the light stage (it was decorated with deep generators present). */
     boolean bellow$isLightPending();
 

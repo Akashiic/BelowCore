@@ -3,6 +3,7 @@ package com.akashiic.bellow.mixin.early.common;
 import java.util.List;
 
 import net.minecraft.network.Packet;
+import net.minecraft.network.play.server.S21PacketChunkData;
 import net.minecraft.server.management.PlayerManager;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.ChunkCoordIntPair;
@@ -108,6 +109,21 @@ public abstract class MixinPlayerInstance_Deep implements IDeepPlayerInstance, D
         for (Object o : chunk.chunkTileEntityMap.values()) {
             TileEntity te = (TileEntity) o;
             if (te.yCoord >= 0 || te.isInvalid() || (slotMask & DeepConstants.slotBit(te.yCoord >> 4)) == 0) continue;
+            Packet description = te.getDescriptionPacket();
+            if (description != null) this.sendToAllPlayersWatchingChunk(description);
+        }
+    }
+
+    @Override
+    public void bellow$resendSections(int sectionMask) {
+        if ((sectionMask & 0xFFFF) == 0) return;
+        WorldServer world = this.this$0.getWorldServer();
+        Chunk chunk = world.getChunkFromChunkCoords(this.chunkLocation.chunkXPos, this.chunkLocation.chunkZPos);
+        this.sendToAllPlayersWatchingChunk(new S21PacketChunkData(chunk, false, sectionMask & 0xFFFF));
+        for (Object o : chunk.chunkTileEntityMap.values()) {
+            TileEntity te = (TileEntity) o;
+            if (te.yCoord < 0 || te.yCoord > 255 || te.isInvalid() || (sectionMask & 1 << (te.yCoord >> 4)) == 0)
+                continue;
             Packet description = te.getDescriptionPacket();
             if (description != null) this.sendToAllPlayersWatchingChunk(description);
         }
